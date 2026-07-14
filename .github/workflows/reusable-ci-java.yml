@@ -1,0 +1,22 @@
+name: Reusable CI (Java)
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        type: string
+        default: "17"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+          cache: maven
+
+      - run: ./mvnw -B clean verify

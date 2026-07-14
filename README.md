@@ -57,3 +57,17 @@ jobs:
     secrets:
       project-token: ${{ secrets.PROJECT_TOKEN }}
 ```
+
+### `reusable-ci-java.yml`
+Sets up Temurin JDK 17 and runs `./mvnw -B clean verify`. For Maven/Spring Boot repos.
+
+```yaml
+name: CI
+on:
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  ci:
+    uses: klozano/rlc-workflows/.github/workflows/reusable-ci-java.yml@main
+```
