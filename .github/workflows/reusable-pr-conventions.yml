@@ -1,0 +1,35 @@
+name: Reusable PR Conventions Check
+
+on:
+  workflow_call: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Branch name follows feature/<issue-number>-*
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if [[ ! "$HEAD_REF" =~ ^feature/[0-9]+-[a-z0-9-]+$ ]]; then
+            echo "::error::Branch '$HEAD_REF' does not match feature/<issue-number>-<slug> (e.g. feature/12-landing-hero)."
+            exit 1
+          fi
+
+      - name: PR title follows Conventional Commits
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ ! "$PR_TITLE" =~ ^(feat|fix|chore|docs|refactor|test|style|perf|ci|build)(\(.+\))?:\ .+ ]]; then
+            echo "::error::PR title '$PR_TITLE' does not follow Conventional Commits (e.g. 'feat: add cart page')."
+            exit 1
+          fi
+
+      - name: PR body references an issue
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [[ ! "$PR_BODY" =~ (Closes|Refs)\ #[0-9]+ ]]; then
+            echo "::error::PR body must reference a ticket with 'Closes #N' or 'Refs #N'."
+            exit 1
+          fi
