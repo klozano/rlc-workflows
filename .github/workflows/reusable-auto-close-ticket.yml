@@ -1,0 +1,77 @@
+name: Reusable Auto-Close Ticket
+
+on:
+  workflow_call:
+    inputs:
+      project-owner:
+        type: string
+        required: true
+      project-number:
+        type: string
+        required: true
+      done-option-id:
+        type: string
+        required: true
+      status-field-id:
+        type: string
+        required: true
+    secrets:
+      project-token:
+        required: true
+
+jobs:
+  close-ticket:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find PR for this merge commit
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          number=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '.[0].number')
+          body=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '.[0].body')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          issue=$(echo "$body" | grep -oE '(Closes|Refs) #[0-9]+' | head -1 | grep -oE '[0-9]+')
+          echo "issue=$issue" >> "$GITHUB_OUTPUT"
+
+      - name: Close referenced issue
+        if: steps.pr.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue close "${{ steps.pr.outputs.issue }}" \
+            --repo "${{ github.repository }}" \
+            --comment "Merged via #${{ steps.pr.outputs.number }}" \
+            --reason completed
+
+      - name: Move board item to Done
+        if: steps.pr.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ secrets.project-token }}
+        run: |
+          issue_node_id=$(gh api "repos/${{ github.repository }}/issues/${{ steps.pr.outputs.issue }}" --jq '.node_id')
+
+          item_id=$(gh api graphql -f query='
+            query($owner: String!, $number: Int!) {
+              user(login: $owner) {
+                projectV2(number: $number) {
+                  items(first: 100) {
+                    nodes { id content { ... on Issue { id } } }
+                  }
+                }
+              }
+            }' -f owner="${{ inputs.project-owner }}" -F number="${{ inputs.project-number }}" \
+            --jq ".data.user.projectV2.items.nodes[] | select(.content.id == \"$issue_node_id\") | .id")
+
+          if [ -n "$item_id" ]; then
+            gh api graphql -f query='
+              mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $project, itemId: $item, fieldId: $field,
+                  value: { singleSelectOptionId: $option }
+                }) { projectV2Item { id } }
+              }' -f project="$(gh api graphql -f query='query($owner:String!,$number:Int!){user(login:$owner){projectV2(number:$number){id}}}' -f owner="${{ inputs.project-owner }}" -F number="${{ inputs.project-number }}" --jq '.data.user.projectV2.id')" \
+              -f item="$item_id" -f field="${{ inputs.status-field-id }}" -f option="${{ inputs.done-option-id }}"
+          fi
