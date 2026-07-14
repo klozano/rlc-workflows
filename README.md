@@ -40,11 +40,18 @@ On push to `develop`, finds the PR that was just merged, closes the issue it ref
 
 Requires a `PROJECT_TOKEN` secret in the caller repo — a personal access token with `repo` + `project` scopes (the default `GITHUB_TOKEN` can't write to a user-owned Project board). Set it once per repo: `gh secret set PROJECT_TOKEN`.
 
+**Important:** the caller workflow MUST declare its own top-level `permissions:` block. A reusable workflow's job permissions can never exceed what the caller's token already has — without this, the run fails with `startup_failure` and 0 jobs (no useful log), because the reusable job's `issues: write` request is a permission escalation over the caller's default (`contents: read` only, in this account).
+
 ```yaml
 name: Auto-close ticket
 on:
   push:
     branches: [develop]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
 
 jobs:
   auto-close:
@@ -56,4 +63,18 @@ jobs:
       done-option-id: "0374ca25"
     secrets:
       project-token: ${{ secrets.PROJECT_TOKEN }}
+```
+
+### `reusable-ci-java.yml`
+Sets up Temurin JDK 17 and runs `./mvnw -B clean verify`. For Maven/Spring Boot repos.
+
+```yaml
+name: CI
+on:
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  ci:
+    uses: klozano/rlc-workflows/.github/workflows/reusable-ci-java.yml@main
 ```
