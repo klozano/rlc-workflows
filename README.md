@@ -78,3 +78,17 @@ jobs:
   ci:
     uses: klozano/rlc-workflows/.github/workflows/reusable-ci-java.yml@main
 ```
+
+### `reusable-ci-python.yml`
+Installs from `requirements-dev.txt`, runs `ruff check .` and `pytest`. For FastAPI/Python repos.
+
+```yaml
+name: CI
+on:
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  ci:
+    uses: klozano/rlc-workflows/.github/workflows/reusable-ci-python.yml@main
+```
