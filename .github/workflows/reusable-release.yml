@@ -1,0 +1,99 @@
+name: Reusable Release
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: The version tag created by this run (e.g. v1.2.3)
+        value: ${{ jobs.release.outputs.version }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last_tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+
+          if [ -z "$last_tag" ]; then
+            version="v0.1.0"
+            echo "No previous tag found, bootstrapping at $version"
+          else
+            subjects=$(git log "$last_tag"..HEAD --format=%s)
+            bodies=$(git log "$last_tag"..HEAD --format=%B)
+
+            bump="patch"
+            if echo "$bodies" | grep -qE 'BREAKING CHANGE'; then
+              bump="major"
+            elif echo "$subjects" | grep -qE '^feat(\(.+\))?:'; then
+              bump="minor"
+            fi
+
+            IFS='.' read -r major minor patch <<< "${last_tag#v}"
+            case "$bump" in
+              major) version="v$((major + 1)).0.0" ;;
+              minor) version="v${major}.$((minor + 1)).0" ;;
+              patch) version="v${major}.${minor}.$((patch + 1))" ;;
+            esac
+            echo "Last tag: $last_tag, bump: $bump, next version: $version"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "last_tag=$last_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          git tag "$version"
+          git push origin "$version"
+          gh release create "$version" --repo "${{ github.repository }}" --generate-notes
+
+      - name: Create milestone and assign closed issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST_TAG: ${{ steps.version.outputs.last_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          milestone_number=$(gh api "repos/${{ github.repository }}/milestones" -f title="$VERSION" -f state=open \
+            --jq '.number' 2>/dev/null || true)
+
+          if [ -z "$milestone_number" ]; then
+            milestone_number=$(gh api "repos/${{ github.repository }}/milestones?state=all" \
+              --jq ".[] | select(.title == \"$VERSION\") | .number")
+          fi
+
+          if [ -z "$milestone_number" ]; then
+            echo "::warning::Could not create or find milestone $VERSION, skipping issue assignment"
+            exit 0
+          fi
+
+          if [ -z "$LAST_TAG" ]; then
+            pr_numbers=$(git log --format=%s | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+' || true)
+          else
+            pr_numbers=$(git log "$LAST_TAG"..HEAD --format=%s | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+' || true)
+          fi
+
+          for pr in $pr_numbers; do
+            body=$(gh pr view "$pr" --repo "${{ github.repository }}" --json body --jq '.body' 2>/dev/null || true)
+            issue=$(echo "$body" | grep -oE '(Closes|Refs) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+            if [ -n "$issue" ]; then
+              gh api "repos/${{ github.repository }}/issues/$issue" -X PATCH -F milestone="$milestone_number" >/dev/null
+              echo "Assigned issue #$issue to milestone $VERSION"
+            fi
+          done
