@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Branch name follows feature/<issue-number>-*
+        if: ${{ !(github.event.pull_request.head.ref == 'develop' && github.event.pull_request.base.ref == 'main') }}
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
@@ -17,6 +18,7 @@ jobs:
           fi
 
       - name: PR title follows Conventional Commits
+        if: ${{ !(github.event.pull_request.head.ref == 'develop' && github.event.pull_request.base.ref == 'main') }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
