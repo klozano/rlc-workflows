@@ -1,0 +1,69 @@
+name: Reusable Release Docker Image
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The version tag just created by reusable-release.yml (e.g. v1.2.3)
+        type: string
+        required: true
+      image-name:
+        description: GHCR image name, usually the repo name (e.g. rlc-auth-api)
+        type: string
+        required: true
+    secrets:
+      project-token:
+        required: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout at release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ inputs.version }}
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:latest
+
+      - name: Detect requires-downtime label
+        id: downtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr_number=$(git log -1 --format=%s | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+' || true)
+          requires_downtime="false"
+          if [ -n "$pr_number" ]; then
+            labels=$(gh pr view "$pr_number" --repo "${{ github.repository }}" --json labels --jq '.labels[].name' 2>/dev/null || true)
+            if echo "$labels" | grep -qx "requires-downtime"; then
+              requires_downtime="true"
+            fi
+          fi
+          echo "requires_downtime=$requires_downtime" >> "$GITHUB_OUTPUT"
+
+      - name: Notify rlc-infra
+        env:
+          GH_TOKEN: ${{ secrets.project-token }}
+        run: |
+          gh api repos/klozano/rlc-infra/dispatches \
+            -f event_type=product-released \
+            -F "client_payload[repo]=${{ inputs.image-name }}" \
+            -F "client_payload[version]=${{ inputs.version }}" \
+            -F "client_payload[requires_downtime]=${{ steps.downtime.outputs.requires_downtime }}"
